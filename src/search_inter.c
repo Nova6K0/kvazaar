@@ -135,19 +135,19 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       ((info->origin.y + info->height + margin) * 4 + y) / (LCU_WIDTH << 2) - orig_lcu.y,
     };
 
-    kvz_picture* current_img = info->pic->base_image;
-    kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx]->base_image;
+    int current_num = info->pic->base_image->num;
+    int ref_num = info->state->frame->ref->images[ref_list_idx]->base_image->num;
 
-    int diff = current_img->dts - ref_img->dts;
+    int diff = current_num - ref_num;
 
     // if diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete
     if (diff <= ctrl->cfg.owf) {
       // TODO: consider doing the divisions once per frame
 
       // special case needed if there is an intra frame between current and ref frame
-      int offset = (ctrl->cfg.gop_len - 1) << 1;
-      if (ctrl->cfg.owf >= ctrl->cfg.gop_len && (current_img->dts + offset) / ctrl->cfg.intra_period != (ref_img->dts + offset) / ctrl->cfg.intra_period) {
-        diff = (current_img->dts + offset) % ctrl->cfg.intra_period;
+      int offset = ctrl->cfg.gop_len - 1;
+      if (ctrl->cfg.owf >= ctrl->cfg.gop_len && (current_num + offset) / ctrl->cfg.intra_period != (ref_num + offset) / ctrl->cfg.intra_period) {
+        diff = (current_num + offset) % ctrl->cfg.intra_period;
       }
 
       // the dependency chains are slightly different for LP-GOPs

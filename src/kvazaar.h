@@ -526,6 +526,8 @@ typedef struct kvz_picture {
 
   int32_t ref_pocs[16];
 
+  int32_t num;
+
   struct
   {
     int width;

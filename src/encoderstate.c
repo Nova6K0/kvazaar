@@ -1207,6 +1207,9 @@ static void encoder_set_source_picture(encoder_state_t * const state, kvz_pictur
   }
 
   kvz_videoframe_set_poc(state->tile->frame, state->frame->poc);
+
+  state->tile->frame->source->num = state->frame->num;
+  state->tile->frame->rec->num = state->frame->num;
 }
 
 static void encoder_state_init_children(encoder_state_t * const state) {
