@@ -135,26 +135,14 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       ((info->origin.y + info->height + margin) * 4 + y) / (LCU_WIDTH << 2) - orig_lcu.y,
     };
 
-    //if (mv_lcu.y > ctrl->max_inter_ref_lcu.down) {
-    //  return false;
-    //}
-
-    //if (mv_lcu.x + mv_lcu.y >
-    //    ctrl->max_inter_ref_lcu.down + ctrl->max_inter_ref_lcu.right)
-    //{
-    //  return false;
-    //}
     kvz_picture* current_img = info->pic->base_image;
     kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx]->base_image;
-    // int current_num = info->pic->base_image->num;
-    // int ref_num = info->state->frame->ref->images[ref_list_idx]->base_image->num;
 
     int diff = current_img->dts - ref_img->dts;
 
     // if diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete
     if (diff <= ctrl->cfg.owf) {
-
-      // TODO: consider doing divisions on a frame-level
+      // TODO: consider doing the divisions once per frame
 
       // special case needed if there is an intra frame between current and ref frame
       int offset = (ctrl->cfg.gop_len - 1) << 1;
@@ -162,7 +150,7 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
         diff = (current_img->dts + offset) % ctrl->cfg.intra_period;
       }
 
-      // dependency chains are slightly different for LP-GOPs
+      // the dependency chains are slightly different for LP-GOPs
       if (ctrl->cfg.gop_lowdelay) {
         diff = (diff + ctrl->cfg.gop_lp_definition.t - 1) / ctrl->cfg.gop_lp_definition.t;
       }
@@ -1460,9 +1448,6 @@ static void search_pu_inter_ref(inter_search_info_t *info,
       unipred_pu->skipped = false;
       unipred_pu->inter.mv_dir = ref_list + 1;
       unipred_pu->inter.mv_ref[ref_list] = LX_idx;
-      //if (best_mv.x < -30000) {
-      //  printf("before cast %d, %d, %d\n", best_mv.x, best_mv.y, ref_list);
-      //}
       unipred_pu->inter.mv[ref_list][0] = (int16_t) CLIP(-32768, 32767, best_mv.x);
       unipred_pu->inter.mv[ref_list][1] = (int16_t) CLIP(-32768, 32767, best_mv.y);
       CU_SET_MV_CAND(unipred_pu, ref_list, cu_mv_cand);
