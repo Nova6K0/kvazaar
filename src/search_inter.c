@@ -145,9 +145,11 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       // TODO: consider doing the divisions once per frame
 
       // special case needed if there is an intra frame between current and ref frame
-      int offset = ctrl->cfg.gop_len - 1;
-      if (ctrl->cfg.owf >= ctrl->cfg.gop_len && (current_num + offset) / ctrl->cfg.intra_period != (ref_num + offset) / ctrl->cfg.intra_period) {
-        diff = (current_num + offset) % ctrl->cfg.intra_period;
+      if (ctrl->cfg.intra_period) {
+        int offset = ctrl->cfg.gop_len - 1;
+        if (ctrl->cfg.owf >= ctrl->cfg.gop_len && (current_num + offset) / ctrl->cfg.intra_period != (ref_num + offset) / ctrl->cfg.intra_period) {
+          diff = (current_num + offset) % ctrl->cfg.intra_period;
+        }
       }
 
       // the dependency chains are slightly different for LP-GOPs
