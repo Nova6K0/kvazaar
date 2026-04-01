@@ -135,25 +135,25 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       ((info->origin.y + info->height + margin) * 4 + y) / (LCU_WIDTH << 2) - orig_lcu.y,
     };
 
-    int current_num = info->pic->base_image->num;
-    int ref_num = info->state->frame->ref->images[ref_list_idx]->base_image->num;
+    kvz_picture* current_img = info->pic;
+    kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx];
+
+    int current_num = current_img->num;
+    int ref_num = ref_img->num;
 
     int diff = current_num - ref_num;
 
     // if diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete
     if (diff <= ctrl->cfg.owf) {
-      // TODO: consider doing the divisions once per frame
 
       // special case needed if there is an intra frame between current and ref frame
-      if (ctrl->cfg.intra_period) {
-        int offset = ctrl->cfg.gop_len - 1;
-        if (ctrl->cfg.owf >= ctrl->cfg.gop_len && (current_num + offset) / ctrl->cfg.intra_period != (ref_num + offset) / ctrl->cfg.intra_period) {
-          diff = (current_num + offset) % ctrl->cfg.intra_period;
-        }
+      if (ctrl->cfg.intra_period && (current_img->intra_group != ref_img->intra_group)) {
+        diff = current_img->intra_offset;
       }
 
       // the dependency chains are slightly different for LP-GOPs
       if (ctrl->cfg.gop_lowdelay) {
+        // TODO: consider precomputing the division at the frame level to avoid unnecessary repeat computation
         diff = (diff + ctrl->cfg.gop_lp_definition.t - 1) / ctrl->cfg.gop_lp_definition.t;
       }
 

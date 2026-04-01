@@ -527,6 +527,8 @@ typedef struct kvz_picture {
   int32_t ref_pocs[16];
 
   int32_t num;
+  int32_t intra_group;
+  int32_t intra_offset;
 
   struct
   {
