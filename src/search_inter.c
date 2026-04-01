@@ -135,8 +135,8 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       ((info->origin.y + info->height + margin) * 4 + y) / (LCU_WIDTH << 2) - orig_lcu.y,
     };
 
-    kvz_picture* current_img = info->pic;
-    kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx];
+    const kvz_picture* current_img = info->pic;
+    const kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx];
 
     int current_num = current_img->num;
     int ref_num = ref_img->num;
