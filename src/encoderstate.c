@@ -805,6 +805,9 @@ static void encoder_state_encode_leaf(encoder_state_t * const state)
     // Select which frame dependancies should be set to.
     const encoder_state_t * ref_state = NULL;
 
+    // NOTE: Any changes to dependencies will also require modifying the
+    // MV constraints in fracmv_within_tile in search_inter.c accordingly
+
     if (state->frame->slicetype == KVZ_SLICE_I) {
       // I-frames have no references.
       ref_state = NULL;

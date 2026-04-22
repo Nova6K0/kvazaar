@@ -141,19 +141,22 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
     int current_num = current_img->num;
     int ref_num = ref_img->num;
 
+    // As dependency is always applied to the previous frame in the coding order, the difference
+    // in frame numbers can be used to figure out the appropriate limits for MVs. Will need
+    // more complex logic if this behaviour is changed.
     int diff = current_num - ref_num;
 
-    // if diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete
+    // If diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete.
     if (diff <= ctrl->cfg.owf) {
 
-      // special case needed if there is an intra frame between current and ref frame
+      // Special case needed if there is an intra frame between current and ref frame.
       if (ctrl->cfg.intra_period && (current_img->intra_group != ref_img->intra_group)) {
         diff = current_img->intra_offset;
       }
 
-      // the dependency chains are slightly different for LP-GOPs
+      // The dependency chains are slightly different for LP-GOPs.
       if (ctrl->cfg.gop_lowdelay) {
-        // TODO: consider precomputing the division at the frame level to avoid unnecessary repeat computation
+        // TODO: Consider precomputing the division at the frame level to avoid unnecessary repeat computation.
         diff = (diff + ctrl->cfg.gop_lp_definition.t - 1) / ctrl->cfg.gop_lp_definition.t;
       }
 
