@@ -805,6 +805,9 @@ static void encoder_state_encode_leaf(encoder_state_t * const state)
     // Select which frame dependancies should be set to.
     const encoder_state_t * ref_state = NULL;
 
+    // NOTE: Any changes to dependencies will also require modifying the
+    // MV constraints in fracmv_within_tile in search_inter.c accordingly
+
     if (state->frame->slicetype == KVZ_SLICE_I) {
       // I-frames have no references.
       ref_state = NULL;
@@ -1207,6 +1210,26 @@ static void encoder_set_source_picture(encoder_state_t * const state, kvz_pictur
   }
 
   kvz_videoframe_set_poc(state->tile->frame, state->frame->poc);
+
+  int frame_number = state->frame->num;
+
+  state->tile->frame->source->num = frame_number;
+  state->tile->frame->rec->num = frame_number;
+
+  int intra_group = 0;
+  int intra_offset = 0;
+
+  if (state->encoder_control->cfg.intra_period) {
+    int offset = state->encoder_control->cfg.gop_len - 1;
+    intra_group = (frame_number + offset) / state->encoder_control->cfg.intra_period;
+    intra_offset = (frame_number + offset) % state->encoder_control->cfg.intra_period;
+  }
+
+  state->tile->frame->source->intra_group = intra_group;
+  state->tile->frame->source->intra_offset = intra_offset;
+
+  state->tile->frame->rec->intra_group = intra_group;
+  state->tile->frame->rec->intra_offset = intra_offset;
 }
 
 static void encoder_state_init_children(encoder_state_t * const state) {

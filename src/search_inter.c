@@ -91,7 +91,7 @@ typedef struct {
 /**
  * \return  True if referred block is within current tile.
  */
-static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, int y)
+static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, int y, int ref_list_idx)
 {
   const encoder_control_t *ctrl = info->state->encoder_control;
 
@@ -135,14 +135,40 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
       ((info->origin.y + info->height + margin) * 4 + y) / (LCU_WIDTH << 2) - orig_lcu.y,
     };
 
-    if (mv_lcu.y > ctrl->max_inter_ref_lcu.down) {
-      return false;
-    }
+    const kvz_picture* current_img = info->pic;
+    const kvz_picture* ref_img = info->state->frame->ref->images[ref_list_idx];
 
-    if (mv_lcu.x + mv_lcu.y >
-        ctrl->max_inter_ref_lcu.down + ctrl->max_inter_ref_lcu.right)
-    {
-      return false;
+    int current_num = current_img->num;
+    int ref_num = ref_img->num;
+
+    // As dependency is always applied to the previous frame in the coding order, the difference
+    // in frame numbers can be used to figure out the appropriate limits for MVs. Will need
+    // more complex logic if this behaviour is changed.
+    int diff = current_num - ref_num;
+
+    // If diff is larger than the number of OWF frames, the reference frame is guaranteed to be fully complete.
+    if (diff <= ctrl->cfg.owf) {
+
+      // Special case needed if there is an intra frame between current and ref frame.
+      if (ctrl->cfg.intra_period && (current_img->intra_group != ref_img->intra_group)) {
+        diff = current_img->intra_offset;
+      }
+
+      // The dependency chains are slightly different for LP-GOPs.
+      if (ctrl->cfg.gop_lowdelay) {
+        // TODO: Consider precomputing the division at the frame level to avoid unnecessary repeat computation.
+        diff = (diff + ctrl->cfg.gop_lp_definition.t - 1) / ctrl->cfg.gop_lp_definition.t;
+      }
+
+      if (mv_lcu.y > ctrl->max_inter_ref_lcu.down * diff) {
+        return false;
+      }
+
+      if (mv_lcu.x + mv_lcu.y >
+        (ctrl->max_inter_ref_lcu.down + ctrl->max_inter_ref_lcu.right) * diff)
+      {
+        return false;
+      }
     }
   }
 
@@ -182,9 +208,9 @@ static INLINE bool fracmv_within_tile(const inter_search_info_t *info, int x, in
 /**
  * \return  True if referred block is within current tile.
  */
-static INLINE bool intmv_within_tile(const inter_search_info_t *info, int x, int y)
+static INLINE bool intmv_within_tile(const inter_search_info_t *info, int x, int y, int ref_list_idx)
 {
-  return fracmv_within_tile(info, x * 4, y * 4);
+  return fracmv_within_tile(info, x * 4, y * 4, ref_list_idx);
 }
 
 
@@ -206,7 +232,7 @@ static bool check_mv_cost(inter_search_info_t *info,
                           double* best_bits,
                           vector2d_t *best_mv)
 {
-  if (!intmv_within_tile(info, x, y)) return false;
+  if (!intmv_within_tile(info, x, y, info->ref_idx)) return false;
 
   double bitcost = 0;
   double cost = kvz_image_calc_sad(
@@ -934,7 +960,7 @@ static void search_mv_full(inter_search_info_t *info,
 
     for (int y = min_mv.y; y <= max_mv.y; ++y) {
       for (int x = min_mv.x; x <= max_mv.x; ++x) {
-        if (!intmv_within_tile(info, x, y)) {
+        if (!intmv_within_tile(info, x, y, info->ref_idx)) {
           continue;
         }
 
@@ -1106,7 +1132,7 @@ static void search_frac(inter_search_info_t *info,
     int8_t within_tile[4];
     for (int j = 0; j < 4; j++) {
       within_tile[j] =
-        fracmv_within_tile(info, (mv.x + pattern[j]->x) * (1 << mv_shift), (mv.y + pattern[j]->y) * (1 << mv_shift));
+        fracmv_within_tile(info, (mv.x + pattern[j]->x) * (1 << mv_shift), (mv.y + pattern[j]->y) * (1 << mv_shift), info->ref_idx);
     };
 
     kvz_pixel *filtered_pos[4] = { 0 };
@@ -1333,7 +1359,9 @@ static void search_pu_inter_ref(inter_search_info_t *info,
     }
 
     // Check if the mv is valid after scaling
-    if (fracmv_within_tile(info, mv_previous.x, mv_previous.y)) {
+    if (fracmv_within_tile(info, mv_previous.x, mv_previous.y,
+      info->state->frame->ref_LX[ref_list][LX_idx]))
+    {
       best_mv = mv_previous;
     }
   }
@@ -1354,7 +1382,7 @@ static void search_pu_inter_ref(inter_search_info_t *info,
   // include both mv_cand vectors and (0, 0).
   select_starting_point(info, best_mv, &best_cost, &best_bits, &best_mv);
   bool skip_me = early_terminate(info, &best_cost, &best_bits, &best_mv);
-      
+  
   if (!(info->state->encoder_control->cfg.me_early_termination && skip_me)) {
 
     switch (cfg->ime_algorithm) {
@@ -1410,7 +1438,9 @@ static void search_pu_inter_ref(inter_search_info_t *info,
     LX_bits[ref_list] += extra_bits;
 
     // Update best unipreds for biprediction
-    bool valid_mv = fracmv_within_tile(info, best_mv.x, best_mv.y);
+    bool valid_mv = fracmv_within_tile(info, best_mv.x, best_mv.y,
+      info->state->frame->ref_LX[ref_list][LX_idx]);
+
     if (valid_mv && best_cost < MAX_DOUBLE) {
 
       // Map reference index to L0/L1 pictures
@@ -1423,8 +1453,8 @@ static void search_pu_inter_ref(inter_search_info_t *info,
       unipred_pu->skipped = false;
       unipred_pu->inter.mv_dir = ref_list + 1;
       unipred_pu->inter.mv_ref[ref_list] = LX_idx;
-      unipred_pu->inter.mv[ref_list][0] = (int16_t)best_mv.x;
-      unipred_pu->inter.mv[ref_list][1] = (int16_t)best_mv.y;
+      unipred_pu->inter.mv[ref_list][0] = (int16_t) CLIP(-32768, 32767, best_mv.x);
+      unipred_pu->inter.mv[ref_list][1] = (int16_t) CLIP(-32768, 32767, best_mv.y);
       CU_SET_MV_CAND(unipred_pu, ref_list, cu_mv_cand);
 
       cur_map->cost[entry] = best_cost;
@@ -1496,8 +1526,10 @@ static void search_pu_inter_bipred(inter_search_info_t *info,
     }
 
     // Don't try merge candidates that don't satisfy mv constraints.
-    if (!fracmv_within_tile(info, mv[0][0], mv[0][1]) ||
-        !fracmv_within_tile(info, mv[1][0], mv[1][1]))
+    if (!fracmv_within_tile(info, mv[0][0], mv[0][1],
+          info->state->frame->ref_LX[0][bipred_pu->inter.mv_ref[0]]) ||
+        !fracmv_within_tile(info, mv[1][0], mv[1][1],
+          info->state->frame->ref_LX[1][bipred_pu->inter.mv_ref[1]]))
     {
       continue;
     }
@@ -1703,8 +1735,10 @@ static void search_pu_inter(encoder_state_t * const state,
     // Don't add duplicates to list
     bool active_L0 = cur_pu->inter.mv_dir & 1;
     bool active_L1 = cur_pu->inter.mv_dir & 2;
-    if ((active_L0 && !fracmv_within_tile(info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1])) ||
-        (active_L1 && !fracmv_within_tile(info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1])) ||
+    if ((active_L0 && !fracmv_within_tile(info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1],
+          state->frame->ref_LX[0][cur_pu->inter.mv_ref[0]])) ||
+        (active_L1 && !fracmv_within_tile(info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1],
+          state->frame->ref_LX[1][cur_pu->inter.mv_ref[1]])) ||
         is_duplicate)
     {
       continue;
@@ -1887,8 +1921,10 @@ static void search_pu_inter(encoder_state_t * const state,
         vector2d_t frac_mv = { unipred_pu->inter.mv[list][0], unipred_pu->inter.mv[list][1] };
 
         // Check that at least one quarter-pel step is possible
-        if (!fracmv_within_tile(info, frac_mv.x + 3, frac_mv.y + 3) &&
-            !fracmv_within_tile(info, frac_mv.x - 3, frac_mv.y - 3)) {
+        if (!fracmv_within_tile(info, frac_mv.x + 3, frac_mv.y + 3,
+              state->frame->ref_LX[list][unipred_pu->inter.mv_ref[list]]) &&
+            !fracmv_within_tile(info, frac_mv.x - 3, frac_mv.y - 3,
+              state->frame->ref_LX[list][unipred_pu->inter.mv_ref[list]])) {
           continue;
         }
 
@@ -1900,7 +1936,9 @@ static void search_pu_inter(encoder_state_t * const state,
         frac_cost += extra_bits * info->state->lambda_sqrt;
         frac_bits += extra_bits;
 
-        bool valid_mv = fracmv_within_tile(info, frac_mv.x, frac_mv.y);
+        bool valid_mv = fracmv_within_tile(info, frac_mv.x, frac_mv.y,
+          state->frame->ref_LX[list][unipred_pu->inter.mv_ref[list]]);
+
         if (valid_mv) {
 
           unipred_pu->inter.mv[list][0] = frac_mv.x;
@@ -2284,11 +2322,13 @@ void kvz_search_cu_inter(encoder_state_t * const state,
   }
 
   if (*inter_cost < MAX_DOUBLE && cur_pu->inter.mv_dir & 1) {
-    assert(fracmv_within_tile(&info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1]));
+    assert(fracmv_within_tile(&info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1],
+      state->frame->ref_LX[0][cur_pu->inter.mv_ref[0]]));
   }
 
   if (*inter_cost < MAX_DOUBLE && cur_pu->inter.mv_dir & 2) {
-    assert(fracmv_within_tile(&info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1]));
+    assert(fracmv_within_tile(&info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1],
+      state->frame->ref_LX[1][cur_pu->inter.mv_ref[1]]));
   }
 }
 
@@ -2393,11 +2433,13 @@ void kvz_search_cu_smp(encoder_state_t* const state,
     }
 
     if (cost < MAX_DOUBLE && cur_pu->inter.mv_dir & 1) {
-      assert(fracmv_within_tile(&info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1]));
+      assert(fracmv_within_tile(&info, cur_pu->inter.mv[0][0], cur_pu->inter.mv[0][1],
+        state->frame->ref_LX[0][cur_pu->inter.mv_ref[0]]));
     }
 
     if (cost < MAX_DOUBLE && cur_pu->inter.mv_dir & 2) {
-      assert(fracmv_within_tile(&info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1]));
+      assert(fracmv_within_tile(&info, cur_pu->inter.mv[1][0], cur_pu->inter.mv[1][1],
+        state->frame->ref_LX[1][cur_pu->inter.mv_ref[1]]));
     }
   }
   double smp_extra_bits = 0;
